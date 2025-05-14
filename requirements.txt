@@ -12,3 +12,4 @@ numpy
 reportlab
 openai
 PyPDF2
+docx2txt
