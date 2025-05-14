@@ -11,3 +11,4 @@ matplotlib
 numpy
 reportlab
 openai
+PyPDF2
