@@ -16,6 +16,20 @@ import os
 from dotenv import load_dotenv
 import requests
 import json
+import spacy
+import spacy.cli
+
+import spacy
+import subprocess
+
+# Load SpaCy model, download if missing
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"], check=True)
+    nlp = spacy.load("en_core_web_sm")
+
+
 
 # ======== NEW AI CHATBOT (UPDATED TO OPENAI>=1.0.0) ========
 load_dotenv()
