@@ -5,7 +5,7 @@ pytesseract
 fpdf
 python-dotenv
 requests
-spacy
+spacy==3.8.5
 Pillow
 matplotlib
 numpy
