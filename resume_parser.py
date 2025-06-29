@@ -2,20 +2,9 @@ import re
 import spacy
 from datetime import datetime
 from typing import Dict, List, Optional
-import PyPDF2
-import docx2txt
 
 # Load SpaCy English model
-import subprocess
-import spacy
-
-# Load SpaCy model, download it if not available
-try:
-    nlp = spacy.load("en_core_web_sm")
-except OSError:
-    subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"], check=True)
-    nlp = spacy.load("en_core_web_sm")
-
+nlp = spacy.load("en_core_web_sm")
 
 def extract_text_from_pdf(file) -> str:
     """Extract text from PDF with error handling."""

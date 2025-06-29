@@ -12,80 +12,48 @@ from PIL import Image
 import pytesseract
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
+from datetime import datetime
+from pymongo import MongoClient
 import os
 from dotenv import load_dotenv
-import requests
-import json
-import spacy
-import spacy.cli
+import openai
+from huggingface_hub import InferenceApi
 
-import spacy
-import subprocess
-
-# Load SpaCy model, download if missing
-try:
-    nlp = spacy.load("en_core_web_sm")
-except OSError:
-    subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"], check=True)
-    nlp = spacy.load("en_core_web_sm")
-
-
-
-# ======== NEW AI CHATBOT (UPDATED TO OPENAI>=1.0.0) ========
+# ========== Load environment variables ==========
 load_dotenv()
+api_token = os.getenv("HUGGINGFACE_API_KEY")
+api = InferenceApi(repo_id="mistralai/Mistral-7B-Instruct-v0.1", token=api_token)
 
+# ========== AI Career Coach Chat ==========
+# ========== AI Career Coach Chat (Mistral Style) ==========
 def career_coach_chat(user_query):
-    """AI Career Coach using OpenRouter with best practices."""
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    if not api_key:
-        return "🚨 API key not found. Please set OPENROUTER_API_KEY in your .env file."
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "HTTP-Referer": "https://yourapp.com",  # Update with your actual app domain
-        "X-Title": "Resume Analyzer Pro",
-        "Content-Type": "application/json"
-    }
-
-    # System prompt that ensures the tone, relevance, and quality
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are an expert career coach. Respond with warm, concise, and highly personalized advice.\n"
-                "- If the user asks for tips, give them relevant and actionable steps.\n"
-                "- If the user seems confused, clarify their goals.\n"
-                "- Never be robotic. Speak naturally and conversationally.\n"
-                "- Include encouragement. Adapt tone to the mood of the question.\n"
-                "- When appropriate, ask follow-up questions to guide them."
-            )
-        },
-        {"role": "user", "content": user_query}
-    ]
-
-    # Choose a well-supported model
-    data = {
-        "model": "meta-llama/llama-3-8b-instruct",  # Recommended for OpenRouter
-        "messages": messages
-    }
-
     try:
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers=headers,
-            data=json.dumps(data)
-        )
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
+        # Format input for Mistral Instruct
+        prompt = f"[INST] {user_query.strip()} [/INST]"
+        
+        # Send to Hugging Face API
+        response = api(inputs=prompt, raw_response=True)
+        response_json = response.json()
+        
+        # Extract the text (check multiple keys)
+        generated_text = response_json.get("generated_text", "").strip()
+        
+        # If Mistral responds with 'text' inside a list
+        if not generated_text and isinstance(response_json, list):
+            generated_text = response_json[0].get("generated_text", "").strip()
 
-    except requests.exceptions.RequestException as e:
-        return f"🚨 Chatbot API Error: {str(e)}"
+        # If no valid text received
+        if not generated_text:
+            return "💡 I couldn't generate a reply right now. Please try rephrasing or asking another question."
+
+        return generated_text
+
     except Exception as e:
-        return f"🚨 Unexpected Error: {str(e)}"
+        return f"🚨 Error: {str(e)}"
 
-# ======== ORIGINAL HELPER FUNCTIONS (UNCHANGED) ========
+
+# ========== Image Text Extraction ==========
 def extract_text_from_image(uploaded_file):
-    """OCR for image-based resumes"""
     try:
         image = Image.open(uploaded_file)
         return pytesseract.image_to_string(image)
@@ -93,8 +61,8 @@ def extract_text_from_image(uploaded_file):
         st.error(f"OCR Error: {str(e)}")
         return ""
 
+# ========== Generate PDF Report ==========
 def generate_pdf_report(suggestions, resume_data, match_score):
-    """Generate PDF using reportlab (better Unicode support)"""
     buffer = io.BytesIO()
     p = canvas.Canvas(buffer, pagesize=letter)
     p.setFont("Helvetica", 16)
@@ -115,8 +83,8 @@ def generate_pdf_report(suggestions, resume_data, match_score):
     buffer.seek(0)
     return buffer.read()
 
+# ========== Generate DOCX Report ==========
 def generate_docx_report(suggestions, resume_data, match_score):
-    """Generate DOCX report with full Unicode support"""
     doc = Document()
     doc.add_heading("Resume Improvement Report", 0)
     doc.add_paragraph(f"Candidate: {resume_data.get('name', 'N/A')}")
@@ -128,7 +96,7 @@ def generate_docx_report(suggestions, resume_data, match_score):
     doc.save(doc_io)
     return doc_io.getvalue()
 
-# ======== STREAMLIT UI (ORIGINAL + NEW FEATURES) ========
+# ========== Streamlit App Setup ==========
 st.set_page_config(
     page_title="AI Resume Analyzer Pro",
     page_icon="📄",
@@ -136,25 +104,28 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ===== NEW SIDEBAR CHATBOT (ADDED) =====
+# ========== Sidebar: AI Career Coach ==========
 with st.sidebar:
     st.title("🤖 Resume Analyzer Pro")
-    
-    # AI Career Coach
+
     if "chat_messages" not in st.session_state:
         st.session_state.chat_messages = []
-        
+
     with st.expander("💬 AI Career Coach", expanded=True):
         user_query = st.text_input("Ask career questions...", key="chat_input")
+
         if user_query:
-            response = career_coach_chat(user_query)
+            if any(greeting in user_query.lower() for greeting in ["hi", "hello", "hey"]):
+                response = "Hello! How can I assist you with your career today?"
+            else:
+                response = career_coach_chat(user_query)
+
             st.session_state.chat_messages.append({"role": "user", "content": user_query})
             st.session_state.chat_messages.append({"role": "assistant", "content": response})
-            
+
         for msg in st.session_state.chat_messages[-6:]:
             st.chat_message(msg["role"]).write(msg["content"])
-    
-    # Original sidebar content
+
     st.markdown("---")
     st.markdown("Made with ❤️ by **Jatin Jawa & Team**")
     st.markdown("### How to Use:")
@@ -164,11 +135,10 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("🚀 *Empowering Job Seekers with AI*")
 
-# ===== MAIN INTERFACE (ORIGINAL IMPLEMENTATION - UNCHANGED) =====
+# ========== Main Interface ==========
 st.title("📄 AI-Powered Resume Analyzer")
 st.caption("Optimize your resume for any job description in seconds")
 
-# File Uploads (Original)
 col1, col2 = st.columns(2)
 with col1:
     uploaded_file = st.file_uploader(
@@ -183,10 +153,8 @@ with col2:
         placeholder="Paste the full job description here..."
     )
 
-# Processing Logic (Original)
 if uploaded_file and job_description:
     with st.spinner("🔍 Analyzing your resume..."):
-        # Original text extraction
         file_text = ""
         if uploaded_file.name.endswith(".pdf"):
             file_text = extract_text_from_pdf(uploaded_file)
@@ -199,19 +167,14 @@ if uploaded_file and job_description:
             st.error("⚠️ Could not extract text from file. Try a different format.")
             st.stop()
 
-        # Original analysis pipeline
         resume_data = parse_resume(file_text)
         match_score = match_resume_to_job(file_text, job_description)
         suggestions = generate_suggestions(resume_data, match_score, job_description)
 
-        # Original report generation
         pdf_bytes = generate_pdf_report(suggestions, resume_data, match_score)
         docx_bytes = generate_docx_report(suggestions, resume_data, match_score)
 
-    # ===== RESULTS DISPLAY =====
     st.success("✅ Analysis Complete!")
-    
-    # Display the suggestions
     st.subheader("🚀 Personalized Suggestions")
     for suggestion in suggestions:
         if "🔴" in suggestion:
@@ -223,46 +186,49 @@ if uploaded_file and job_description:
         else:
             st.info(suggestion, icon="ℹ️")
 
-    # Provide download buttons
-    st.download_button(
-        "📥 Download Suggestions as PDF",
-        data=pdf_bytes,
-        file_name="resume_suggestions.pdf",
-        help="Professional PDF report with all suggestions"
-    )
-    st.download_button(
-        "📥 Download Suggestions as DOCX", 
-        data=docx_bytes,
-        file_name="resume_suggestions.docx",
-        help="Editable Word document with suggestions"
-    )
+    st.download_button("📥 Download Suggestions as PDF", data=pdf_bytes, file_name="resume_suggestions.pdf", key="download_pdf_1")
+    st.download_button("📥 Download Suggestions as DOCX", data=docx_bytes, file_name="resume_suggestions.docx", key="download_docx_1")
 
-    # Skill analysis
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.metric("Overall Match Score", f"{match_score}%")
+    with col_b:
+        if match_score < 40:
+            st.error("🔴 Needs Major Improvement")
+        elif match_score < 70:
+            st.warning("🟡 Good But Could Improve")
+        else:
+            st.success("🟢 Excellent Match!")
+
+    st.divider()
+
     with st.expander("🔍 View Detailed Analysis", expanded=False):
         tab1, tab2, tab3 = st.tabs(["Resume Data", "Skill Matching", "Raw Text"])
-        
+
         with tab1:
             st.subheader("Extracted Resume Data")
             st.json(resume_data)
-        
+
         with tab2:
             st.subheader("Skill Analysis")
             resume_skills = resume_data.get("skills", [])
             job_skills = extract_skills_from_text(job_description)
-            
+
             col_x, col_y = st.columns(2)
             with col_x:
-                st.metric("Your Skills", len(resume_skills))
-                st.write(", ".join(resume_skills) if resume_skills else "None found")
-            
+                with st.container(border=True):
+                    st.metric("Your Skills", len(resume_skills))
+                    st.write(", ".join(resume_skills) if resume_skills else "None found")
+
             with col_y:
-                st.metric("Required Skills", len(job_skills))
-                st.write(", ".join(job_skills) if job_skills else "None specified")
-            
+                with st.container(border=True):
+                    st.metric("Required Skills", len(job_skills))
+                    st.write(", ".join(job_skills) if job_skills else "None specified")
+
             if missing_skills := get_skill_gaps(resume_skills, job_skills):
                 st.error(f"Missing {len(missing_skills)} Key Skills:")
                 st.write(", ".join(missing_skills.keys()))
-        
+
         with tab3:
             st.subheader("Raw Resume Text")
             st.code(file_text[:5000] + "..." if len(file_text) > 5000 else file_text)
